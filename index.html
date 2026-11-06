@@ -126,6 +126,10 @@
     .add-exercise { min-height: 32px; margin-top: 8px; padding: 0 10px; border: 1px dashed #c9cfc5; border-radius: 4px; background: transparent; color: var(--green); font-size: 10px; font-weight: 700; cursor: pointer; }
     .complete-button { flex: 0 0 auto; min-height: 32px; padding: 0 10px; border: 1px solid #dfe5dc; border-radius: 5px; background: white; color: var(--green); font-size: 10px; font-weight: 700; cursor: pointer; }
     .complete-button.done { border-color: #dce8da; background: #edf4eb; }
+    .detail-actions { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; }
+    .edit-workout-button { min-height: 30px; padding: 0 10px; border: 1px solid #dfe5dc; border-radius: 5px; background: white; color: var(--green); font-size: 10px; font-weight: 600; cursor: pointer; }
+    .remove-workout-button { min-height: 30px; padding: 0 10px; border: 1px solid #eadbd5; border-radius: 5px; background: white; color: #a5533a; font-size: 10px; font-weight: 600; cursor: pointer; }
+    .remove-workout-button:hover { border-color: #d9b8aa; background: #fffaf7; }
     .empty-detail { padding: 26px 0 12px; color: var(--muted); font-size: 12px; }
     .empty-detail button { margin-left: 4px; padding: 0; border: 0; background: none; color: var(--green); font-size: inherit; font-weight: 700; cursor: pointer; }
     .goal-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 20px; }
@@ -255,7 +259,7 @@
         <div class="field-row"><label class="field"><span>Day</span><input name="date" type="date" required></label><label class="field"><span>Type</span><select name="type"><option value="upper">Strength</option><option value="lower">Lower body</option><option value="cardio">Cardio</option><option value="mobility">Mobility</option></select></label></div>
         <label class="field"><span>Duration</span><select name="duration"><option value="30">30 minutes</option><option value="45" selected>45 minutes</option><option value="60">60 minutes</option><option value="75">75 minutes</option><option value="90">90 minutes</option></select></label>
         <div class="field"><span>Exercises</span><div class="exercise-editor" id="exerciseEditor"></div><button class="add-exercise" type="button" id="addExerciseButton">＋ Add exercise</button></div>
-        <div class="modal-actions"><button class="secondary-button" type="button" id="cancelModal">Cancel</button><button class="primary-button" type="submit">Save workout</button></div>
+        <div class="modal-actions"><button class="secondary-button" type="button" id="cancelModal">Cancel</button><button class="primary-button" type="submit" id="saveWorkoutButton">Save workout</button></div>
       </form>
     </section>
   </div>
@@ -288,6 +292,7 @@
     let timerRemaining = 0;
     let timerDeadline = 0;
     let timerRunning = false;
+    let editingWorkoutId = null;
 
     function normalizeExercise(exercise) {
       if (typeof exercise === "string") return { name: exercise, sets: 3, reps: "10", rest: 60 };
@@ -395,7 +400,7 @@
       }
       const exercises = (Array.isArray(workout.exercises) ? workout.exercises : []).map(normalizeExercise).filter((exercise) => exercise.name);
       setTimerWorkout(workout);
-      container.innerHTML = `<div class="session-detail"><span class="session-color ${escapeHTML(workout.type)}"></span><div class="detail-main"><h3 class="detail-title">${escapeHTML(workout.name)}</h3><div class="detail-meta">${Number(workout.duration)} minutes${exercises.length ? ` · ${exercises.length} exercises` : ""}</div>${exercises.length ? `<div class="exercise-list">${exercises.map((exercise) => `<div class="exercise-item"><strong>${escapeHTML(exercise.name)}</strong><span>${Number(exercise.sets)} sets × ${escapeHTML(exercise.reps)} reps · ${Number(exercise.rest)}s rest</span></div>`).join("")}</div>` : ""}</div><button class="complete-button${workout.completed ? " done" : ""}" type="button" id="toggleComplete">${workout.completed ? "✓ Done" : "Mark done"}</button></div>`;
+      container.innerHTML = `<div class="session-detail"><span class="session-color ${escapeHTML(workout.type)}"></span><div class="detail-main"><h3 class="detail-title">${escapeHTML(workout.name)}</h3><div class="detail-meta">${Number(workout.duration)} minutes${exercises.length ? ` · ${exercises.length} exercises` : ""}</div>${exercises.length ? `<div class="exercise-list">${exercises.map((exercise) => `<div class="exercise-item"><strong>${escapeHTML(exercise.name)}</strong><span>${Number(exercise.sets)} sets × ${escapeHTML(exercise.reps)} reps · ${Number(exercise.rest)}s rest</span></div>`).join("")}</div>` : ""}</div><div class="detail-actions"><button class="complete-button${workout.completed ? " done" : ""}" type="button" id="toggleComplete">${workout.completed ? "✓ Done" : "Mark done"}</button><button class="edit-workout-button" type="button" id="editWorkout">Edit</button><button class="remove-workout-button" type="button" id="removeWorkout">Remove</button></div></div>`;
       container.insertAdjacentHTML("beforeend", `<div class="workout-timer"><div><div class="timer-label">Workout timer · ${Number(workout.duration)} min</div><div class="timer-display" id="timerDisplay" role="timer" aria-label="Workout countdown">${formatTimer(timerRemaining)}</div></div><div class="timer-controls"><button class="timer-control primary" type="button" id="timerToggle">${timerRunning ? "Pause" : "Start"}</button><button class="timer-control" type="button" id="timerReset">Reset</button></div></div>`);
       bindTimerControls();
       document.getElementById("toggleComplete").addEventListener("click", () => {
@@ -404,6 +409,14 @@
         render();
         showToast(workout.completed ? "Workout complete. Nice work." : "Workout marked as planned.");
       });
+      document.getElementById("removeWorkout").addEventListener("click", () => {
+        if (!window.confirm(`Remove ${workout.name} from your schedule?`)) return;
+        workouts = workouts.filter((item) => item.date !== selectedDate);
+        saveWorkouts();
+        render();
+        showToast("Workout removed from your schedule.");
+      });
+      document.getElementById("editWorkout").addEventListener("click", () => openModal(selectedDate, workout));
     }
 
     function setTimerWorkout(workout) {
@@ -491,16 +504,27 @@
       else addExerciseRow();
     }
 
-    function openModal(date = selectedDate) {
+    function openModal(date = selectedDate, workout = null) {
       const form = document.getElementById("workoutForm");
       form.reset();
-      renderExerciseEditor();
-      form.elements.date.value = date;
+      editingWorkoutId = workout?.id ?? null;
+      renderExerciseEditor(workout?.exercises ?? []);
+      form.elements.date.value = workout?.date ?? date;
+      if (workout) {
+        form.elements.name.value = workout.name;
+        form.elements.type.value = workout.type;
+        form.elements.duration.value = workout.duration;
+      }
+      document.getElementById("modalTitle").textContent = workout ? "Edit workout" : "Plan a workout";
+      document.getElementById("saveWorkoutButton").textContent = workout ? "Save changes" : "Save workout";
       document.getElementById("modalBackdrop").classList.add("open");
       form.elements.name.focus();
     }
 
-    function closeModal() { document.getElementById("modalBackdrop").classList.remove("open"); }
+    function closeModal() {
+      document.getElementById("modalBackdrop").classList.remove("open");
+      editingWorkoutId = null;
+    }
 
     document.getElementById("addWorkoutButton").addEventListener("click", () => openModal(selectedDate));
     document.getElementById("closeModal").addEventListener("click", closeModal);
@@ -518,19 +542,28 @@
       const name = String(data.get("name")).trim();
       const date = String(data.get("date"));
       if (!name || !date) return;
+      const previousWorkout = workouts.find((item) => item.id === editingWorkoutId);
+      const dateConflict = workouts.find((item) => item.date === date && item.id !== previousWorkout?.id);
+      if (dateConflict) {
+        showToast("There is already a workout on that day.");
+        return;
+      }
       const exerciseNames = data.getAll("exerciseName");
       const exerciseSets = data.getAll("exerciseSets");
       const exerciseReps = data.getAll("exerciseReps");
       const exerciseRest = data.getAll("exerciseRest");
       const exercises = exerciseNames.map((exerciseName, index) => ({ name: String(exerciseName).trim(), sets: Number(exerciseSets[index]) || 3, reps: String(exerciseReps[index]).trim() || "10", rest: Number(exerciseRest[index]) || 0 })).filter((exercise) => exercise.name);
-      const workout = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, date, type: String(data.get("type")), duration: Number(data.get("duration")), exercises, completed: false };
-      workouts = [...workouts.filter((item) => item.date !== date), workout];
+      const workout = { id: previousWorkout?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, date, type: String(data.get("type")), duration: Number(data.get("duration")), exercises, completed: previousWorkout?.completed ?? false };
+      workouts = [...workouts.filter((item) => item.id !== workout.id && item.date !== date), workout];
+      clearInterval(timerInterval);
+      timerWorkoutId = null;
+      timerRunning = false;
       saveWorkouts();
       selectedDate = date;
       weekStart = mondayOf(fromKey(date));
       closeModal();
       render();
-      showToast("Workout added to your week.");
+      showToast(previousWorkout ? "Workout updated." : "Workout added to your week.");
     });
 
     render();
